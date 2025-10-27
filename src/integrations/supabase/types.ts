@@ -14,7 +14,194 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      event_responses: {
+        Row: {
+          created_at: string
+          event_id: string
+          id: string
+          is_available: boolean
+          time_slot_id: string
+          user_name: string
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          id?: string
+          is_available: boolean
+          time_slot_id: string
+          user_name: string
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          id?: string
+          is_available?: boolean
+          time_slot_id?: string
+          user_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_responses_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_responses_time_slot_id_fkey"
+            columns: ["time_slot_id"]
+            isOneToOne: false
+            referencedRelation: "time_slots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      events: {
+        Row: {
+          created_at: string
+          creator_id: string
+          id: string
+          location: string | null
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          creator_id: string
+          id?: string
+          location?: string | null
+          name: string
+        }
+        Update: {
+          created_at?: string
+          creator_id?: string
+          id?: string
+          location?: string | null
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "events_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          created_at: string
+          event_id: string
+          id: string
+          message_text: string
+          user_name: string
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          id?: string
+          message_text: string
+          user_name: string
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          id?: string
+          message_text?: string
+          user_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      phone_contacts: {
+        Row: {
+          created_at: string
+          event_id: string
+          id: string
+          name: string | null
+          phone_number: string
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          id?: string
+          name?: string | null
+          phone_number: string
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          id?: string
+          name?: string | null
+          phone_number?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "phone_contacts_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          id: string
+          name: string | null
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          name?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string | null
+        }
+        Relationships: []
+      }
+      time_slots: {
+        Row: {
+          created_at: string
+          date: string
+          event_id: string
+          id: string
+          time: string
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          event_id: string
+          id?: string
+          time: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          event_id?: string
+          id?: string
+          time?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "time_slots_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

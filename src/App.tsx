@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import CreateEvent from "./pages/CreateEvent";
 import EventView from "./pages/EventView";
 import NotFound from "./pages/NotFound";
+import Auth from "./pages/Auth";
 
 const queryClient = new QueryClient();
 
@@ -20,6 +21,7 @@ const App = () => (
         <Layout>
           <Routes>
             <Route path="/" element={<Index />} />
+            <Route path="/auth" element={<Auth />} />
             <Route path="/create" element={<CreateEvent />} />
             <Route path="/event/:eventId" element={<EventView />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

@@ -8,6 +8,7 @@ import { Calendar, MapPin, Users, Share2, Check, X, Phone } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { ChatPanel } from "@/components/ChatPanel";
+import { supabase } from "@/integrations/supabase/client";
 
 interface TimeSlot {
   id: string;
@@ -17,35 +18,94 @@ interface TimeSlot {
 
 interface PhoneContact {
   id: string;
-  number: string;
-  name?: string;
+  name: string | null;
+  phone_number: string;
 }
 
 interface Event {
   id: string;
   name: string;
-  location: string;
-  timeSlots: TimeSlot[];
-  phoneContacts?: PhoneContact[];
-  responses: Record<string, Record<string, boolean>>;
+  location: string | null;
+  creator_id: string;
+}
+
+interface EventResponse {
+  user_name: string;
+  time_slot_id: string;
+  is_available: boolean;
 }
 
 const EventView = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
   const [event, setEvent] = useState<Event | null>(null);
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+  const [phoneContacts, setPhoneContacts] = useState<PhoneContact[]>([]);
+  const [responses, setResponses] = useState<EventResponse[]>([]);
   const [userName, setUserName] = useState("");
   const [userResponses, setUserResponses] = useState<Record<string, boolean>>({});
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (eventId) {
-      const storedEvent = localStorage.getItem(`event_${eventId}`);
-      if (storedEvent) {
-        setEvent(JSON.parse(storedEvent));
-      }
+      fetchEventData();
     }
   }, [eventId]);
+
+  const fetchEventData = async () => {
+    try {
+      // Fetch event details
+      const { data: eventData, error: eventError } = await supabase
+        .from("events")
+        .select("*")
+        .eq("id", eventId)
+        .maybeSingle();
+
+      if (eventError) throw eventError;
+      if (!eventData) {
+        setEvent(null);
+        setLoading(false);
+        return;
+      }
+
+      setEvent(eventData);
+
+      // Fetch time slots
+      const { data: slotsData, error: slotsError } = await supabase
+        .from("time_slots")
+        .select("*")
+        .eq("event_id", eventId)
+        .order("date", { ascending: true });
+
+      if (slotsError) throw slotsError;
+      setTimeSlots(slotsData || []);
+
+      // Fetch phone contacts
+      const { data: contactsData, error: contactsError } = await supabase
+        .from("phone_contacts")
+        .select("*")
+        .eq("event_id", eventId);
+
+      if (contactsError) throw contactsError;
+      setPhoneContacts(contactsData || []);
+
+      // Fetch responses
+      const { data: responsesData, error: responsesError } = await supabase
+        .from("event_responses")
+        .select("*")
+        .eq("event_id", eventId);
+
+      if (responsesError) throw responsesError;
+      setResponses(responsesData || []);
+
+      setLoading(false);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to load event");
+      setLoading(false);
+    }
+  };
 
   const toggleAvailability = (slotId: string) => {
     setUserResponses(prev => ({
@@ -54,7 +114,7 @@ const EventView = () => {
     }));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!userName.trim()) {
       toast.error("Please enter your name");
       return;
@@ -65,19 +125,31 @@ const EventView = () => {
       return;
     }
 
-    if (event && eventId) {
-      const updatedEvent = {
-        ...event,
-        responses: {
-          ...event.responses,
-          [userName]: userResponses
-        }
-      };
-      
-      localStorage.setItem(`event_${eventId}`, JSON.stringify(updatedEvent));
-      setEvent(updatedEvent);
+    setSubmitting(true);
+
+    try {
+      const responsesToInsert = Object.entries(userResponses).map(([slotId, isAvailable]) => ({
+        event_id: eventId!,
+        time_slot_id: slotId,
+        user_name: userName.trim(),
+        is_available: isAvailable,
+      }));
+
+      const { error } = await supabase
+        .from("event_responses")
+        .upsert(responsesToInsert, {
+          onConflict: "event_id,time_slot_id,user_name",
+        });
+
+      if (error) throw error;
+
+      await fetchEventData();
       setHasSubmitted(true);
       toast.success("Your availability has been submitted!");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to submit availability");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -92,9 +164,20 @@ const EventView = () => {
   };
 
   const getAvailabilityCount = (slotId: string) => {
-    if (!event) return 0;
-    return Object.values(event.responses).filter(response => response[slotId]).length;
+    return responses.filter(r => r.time_slot_id === slotId && r.is_available).length;
   };
+
+  const getRespondedUsers = () => {
+    return [...new Set(responses.map(r => r.user_name))];
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-muted-foreground">Loading event...</p>
+      </div>
+    );
+  }
 
   if (!event) {
     return (
@@ -114,9 +197,8 @@ const EventView = () => {
   return (
     <div className="min-h-screen py-8">
       <div className="container mx-auto px-4 max-w-7xl">
-        <div className="grid lg:grid-cols-3 gap-6">{/* Main content - 2 columns */}
+        <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-
             <Card className="shadow-card border-border">
               <CardHeader>
                 <div className="flex items-start justify-between">
@@ -136,24 +218,24 @@ const EventView = () => {
                 </div>
                 <CardDescription className="flex items-center gap-2 mt-2">
                   <Users className="w-4 h-4" />
-                  {Object.keys(event.responses).length} people responded
+                  {getRespondedUsers().length} people responded
                 </CardDescription>
               </CardHeader>
             </Card>
 
-            {event.phoneContacts && event.phoneContacts.length > 0 && (
+            {phoneContacts.length > 0 && (
               <Card className="shadow-card border-border">
                 <CardHeader>
                   <CardTitle className="text-lg">Invited Friends</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
-                    {event.phoneContacts.map((contact) => (
+                    {phoneContacts.map((contact) => (
                       <div key={contact.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/50">
                         <Phone className="w-4 h-4 text-muted-foreground" />
                         <div className="flex-1">
                           {contact.name && <p className="font-medium text-sm">{contact.name}</p>}
-                          <p className="text-sm text-muted-foreground">{contact.number}</p>
+                          <p className="text-sm text-muted-foreground">{contact.phone_number}</p>
                         </div>
                       </div>
                     ))}
@@ -181,7 +263,7 @@ const EventView = () => {
 
                   <div className="space-y-3">
                     <Label>Available Times</Label>
-                    {event.timeSlots.map((slot) => (
+                    {timeSlots.map((slot) => (
                       <div
                         key={slot.id}
                         onClick={() => toggleAvailability(slot.id)}
@@ -217,8 +299,9 @@ const EventView = () => {
                     size="lg" 
                     className="w-full"
                     onClick={handleSubmit}
+                    disabled={submitting}
                   >
-                    Submit Availability
+                    {submitting ? "Submitting..." : "Submit Availability"}
                   </Button>
                 </CardContent>
               </Card>
@@ -229,15 +312,15 @@ const EventView = () => {
                   <CardDescription>See when everyone can make it</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {event.timeSlots.map((slot) => {
+                  {timeSlots.map((slot) => {
                     const count = getAvailabilityCount(slot.id);
-                    const total = Object.keys(event.responses).length;
-                    const availableUsers = Object.entries(event.responses)
-                      .filter(([_, responses]) => responses[slot.id])
-                      .map(([name]) => name);
-                    const unavailableUsers = Object.entries(event.responses)
-                      .filter(([_, responses]) => !responses[slot.id])
-                      .map(([name]) => name);
+                    const total = getRespondedUsers().length;
+                    const availableUsers = responses
+                      .filter(r => r.time_slot_id === slot.id && r.is_available)
+                      .map(r => r.user_name);
+                    const unavailableUsers = responses
+                      .filter(r => r.time_slot_id === slot.id && !r.is_available)
+                      .map(r => r.user_name);
 
                     return (
                       <div
@@ -285,7 +368,6 @@ const EventView = () => {
             )}
           </div>
 
-          {/* Chat sidebar - 1 column */}
           <div className="lg:col-span-1">
             <div className="sticky top-20">
               <ChatPanel eventId={eventId || ""} />

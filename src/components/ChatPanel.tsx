@@ -4,12 +4,14 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Send } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface Message {
   id: string;
-  userName: string;
-  text: string;
-  timestamp: number;
+  user_name: string;
+  message_text: string;
+  created_at: string;
 }
 
 interface ChatPanelProps {
@@ -20,21 +22,34 @@ export function ChatPanel({ eventId }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [userName, setUserName] = useState("");
   const [messageText, setMessageText] = useState("");
+  const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Load messages from localStorage
-    const loadMessages = () => {
-      const storedMessages = localStorage.getItem(`chat_${eventId}`);
-      if (storedMessages) {
-        setMessages(JSON.parse(storedMessages));
-      }
-    };
+    if (eventId) {
+      fetchMessages();
+      
+      // Subscribe to realtime updates
+      const channel = supabase
+        .channel(`messages:${eventId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+            filter: `event_id=eq.${eventId}`,
+          },
+          (payload) => {
+            setMessages(prev => [...prev, payload.new as Message]);
+          }
+        )
+        .subscribe();
 
-    loadMessages();
-    // Poll for new messages
-    const interval = setInterval(loadMessages, 2000);
-    return () => clearInterval(interval);
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
   }, [eventId]);
 
   useEffect(() => {
@@ -44,23 +59,46 @@ export function ChatPanel({ eventId }: ChatPanelProps) {
     }
   }, [messages]);
 
-  const sendMessage = () => {
-    if (!userName.trim() || !messageText.trim()) return;
+  const fetchMessages = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("event_id", eventId)
+        .order("created_at", { ascending: true });
 
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      userName: userName.trim(),
-      text: messageText.trim(),
-      timestamp: Date.now(),
-    };
-
-    const updatedMessages = [...messages, newMessage];
-    localStorage.setItem(`chat_${eventId}`, JSON.stringify(updatedMessages));
-    setMessages(updatedMessages);
-    setMessageText("");
+      if (error) throw error;
+      setMessages(data || []);
+    } catch (error: any) {
+      toast.error("Failed to load messages");
+    }
   };
 
-  const formatTime = (timestamp: number) => {
+  const sendMessage = async () => {
+    if (!userName.trim() || !messageText.trim()) return;
+
+    setSending(true);
+
+    try {
+      const { error } = await supabase
+        .from("messages")
+        .insert({
+          event_id: eventId,
+          user_name: userName.trim(),
+          message_text: messageText.trim(),
+        });
+
+      if (error) throw error;
+
+      setMessageText("");
+    } catch (error: any) {
+      toast.error("Failed to send message");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
@@ -84,12 +122,12 @@ export function ChatPanel({ eventId }: ChatPanelProps) {
                   className="bg-muted/50 rounded-lg p-3 space-y-1"
                 >
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="font-medium text-sm">{message.userName}</span>
+                    <span className="font-medium text-sm">{message.user_name}</span>
                     <span className="text-xs text-muted-foreground">
-                      {formatTime(message.timestamp)}
+                      {formatTime(message.created_at)}
                     </span>
                   </div>
-                  <p className="text-sm">{message.text}</p>
+                  <p className="text-sm">{message.message_text}</p>
                 </div>
               ))
             )}
@@ -111,13 +149,13 @@ export function ChatPanel({ eventId }: ChatPanelProps) {
               value={messageText}
               onChange={(e) => setMessageText(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-              disabled={!userName.trim()}
+              disabled={!userName.trim() || sending}
             />
             <Button
               variant="hero"
               size="icon"
               onClick={sendMessage}
-              disabled={!userName.trim() || !messageText.trim()}
+              disabled={!userName.trim() || !messageText.trim() || sending}
             >
               <Send className="w-4 h-4" />
             </Button>

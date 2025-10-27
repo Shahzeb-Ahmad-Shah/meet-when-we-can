@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Calendar, Clock, Plus, X, Phone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
 interface TimeSlot {
   id: string;
@@ -21,6 +23,7 @@ interface PhoneContact {
 
 const CreateEvent = () => {
   const navigate = useNavigate();
+  const { user, loading } = useAuth();
   const [eventName, setEventName] = useState("");
   const [eventLocation, setEventLocation] = useState("");
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([
@@ -29,6 +32,14 @@ const CreateEvent = () => {
   const [phoneContacts, setPhoneContacts] = useState<PhoneContact[]>([
     { id: "1", number: "", name: "" }
   ]);
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    if (!loading && !user) {
+      toast.error("Please sign in to create events");
+      navigate("/auth");
+    }
+  }, [user, loading, navigate]);
 
   const addTimeSlot = () => {
     setTimeSlots([...timeSlots, { id: Date.now().toString(), date: "", time: "" }]);
@@ -58,7 +69,13 @@ const CreateEvent = () => {
     ));
   };
 
-  const handleCreateEvent = () => {
+  const handleCreateEvent = async () => {
+    if (!user) {
+      toast.error("Please sign in to create events");
+      navigate("/auth");
+      return;
+    }
+
     if (!eventName.trim()) {
       toast.error("Please enter an event name");
       return;
@@ -70,35 +87,71 @@ const CreateEvent = () => {
       return;
     }
 
-    // Generate a simple event ID
-    const eventId = Date.now().toString(36);
-    
-    // Store event in localStorage
-    const filledContacts = phoneContacts.filter(contact => contact.number.trim());
-    
-    const event = {
-      id: eventId,
-      name: eventName,
-      location: eventLocation,
-      timeSlots: filledSlots,
-      phoneContacts: filledContacts,
-      responses: {}
-    };
-    
-    localStorage.setItem(`event_${eventId}`, JSON.stringify(event));
-    
-    toast.success("Event created successfully!");
-    navigate(`/event/${eventId}`);
+    setCreating(true);
+
+    try {
+      // Create event
+      const { data: event, error: eventError } = await supabase
+        .from("events")
+        .insert({
+          name: eventName,
+          location: eventLocation || null,
+          creator_id: user.id,
+        })
+        .select()
+        .single();
+
+      if (eventError) throw eventError;
+
+      // Create time slots
+      const timeSlotsToInsert = filledSlots.map(slot => ({
+        event_id: event.id,
+        date: slot.date,
+        time: slot.time,
+      }));
+
+      const { error: slotsError } = await supabase
+        .from("time_slots")
+        .insert(timeSlotsToInsert);
+
+      if (slotsError) throw slotsError;
+
+      // Create phone contacts
+      const filledContacts = phoneContacts.filter(contact => contact.number.trim());
+      if (filledContacts.length > 0) {
+        const contactsToInsert = filledContacts.map(contact => ({
+          event_id: event.id,
+          name: contact.name || null,
+          phone_number: contact.number,
+        }));
+
+        const { error: contactsError } = await supabase
+          .from("phone_contacts")
+          .insert(contactsToInsert);
+
+        if (contactsError) throw contactsError;
+      }
+
+      toast.success("Event created successfully!");
+      navigate(`/event/${event.id}`);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to create event");
+    } finally {
+      setCreating(false);
+    }
   };
 
   const handleCancel = () => {
     navigate('/');
   };
 
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  }
+
   return (
     <div className="min-h-screen py-12">
       <div className="container mx-auto px-4 max-w-3xl">
-
         <Card className="shadow-card border-border">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between w-full">
@@ -249,8 +302,9 @@ const CreateEvent = () => {
               size="lg" 
               className="w-full"
               onClick={handleCreateEvent}
+              disabled={creating}
             >
-              Create Event & Get Link
+              {creating ? "Creating..." : "Create Event & Get Link"}
             </Button>
           </CardContent>
         </Card>
